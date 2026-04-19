@@ -390,6 +390,99 @@ polybot resolve                         # após mercados resolverem (rodar diár
 polybot calibrate && polybot backtest   # métricas do modelo
 ```
 
+## Cronograma de refino do modelo (4 semanas)
+
+Plano dia-a-dia para sair de `bias_entry` vazia até um modelo calibrado com backtest estável. **Perfil de operação: 1 sessão por dia, a partir das 20h** (única janela de disponibilidade). Pressupõe `venv` ativo (`source venv/bin/activate`) antes dos comandos.
+
+**Implicação do horário único**: mercados com resolução em <24h você só vê uma vez. Por isso o cronograma favorece a flag `--max-hours-to-resolution` reduzida (sim) ou simplesmente foca em mercados com 24-72h restantes. Um scan/dia é **melhor** para calibração do que vários — elimina ruído de rescans.
+
+### Semana 1 — Acumulação bruta (sem refino ainda)
+
+Meta: acumular forecasts paired com mercados que vão resolver nos próximos 5-7 dias.
+
+| Dia | Horário | Ação |
+|---|---|---|
+| Seg | 20:00 | `polybot scan` |
+| Seg | 20:15 | `polybot recommend --min-edge 0.05 --no-save` |
+| Ter | 20:00 | `polybot recommend` |
+| Qua | 20:00 | `polybot recommend` |
+| Qui | 20:00 | `polybot recommend` |
+| Sex | 20:00 | `polybot recommend` |
+| Sáb | 20:00 | `polybot resolve && polybot recommend` |
+| Dom | 20:00 | `polybot dash` |
+
+### Semana 2 — Primeiros outcomes e calibração piloto
+
+Meta: ≥15 outcomes resolvidos, ≥1 bucket de bias ativo (n≥5). O `resolve` passa a ter o que colher (ERA5 cobre mercados da semana 1 com lag ~5 dias).
+
+| Dia | Horário | Ação |
+|---|---|---|
+| Seg | 20:00 | `polybot resolve && polybot recommend` |
+| Ter | 20:00 | `polybot resolve && polybot recommend` |
+| Qua | 20:00 | `polybot resolve && polybot recommend` |
+| Qua | 21:00 | `polybot calibrate` |
+| Qui | 20:00 | `polybot resolve && polybot recommend` |
+| Sex | 20:00 | `polybot resolve && polybot recommend` |
+| Sex | 21:00 | `polybot backtest --from 2026-04-20` |
+| Sáb | 20:00 | `polybot resolve && polybot calibrate` |
+| Dom | 20:00 | `polybot dash` |
+
+### Semana 3 — Ajuste de thresholds via backtest
+
+Um experimento por noite. Métrica de decisão: menor **Brier** E **ROI simulado ≥ 0** (hit rate isolado mente). Anote em CSV externo — o bot não versiona métricas.
+
+| Dia | Horário | Ação |
+|---|---|---|
+| Seg | 20:00 | `polybot resolve && polybot recommend` |
+| Seg | 21:00 | `POLYBOT_MIN_EDGE=0.03 polybot backtest` |
+| Ter | 20:00 | `polybot resolve && polybot recommend` |
+| Ter | 21:00 | `POLYBOT_MIN_EDGE=0.08 polybot backtest` |
+| Qua | 20:00 | `polybot resolve && polybot recommend` |
+| Qua | 21:00 | `POLYBOT_MAX_HOURS_TO_RESOLUTION=48 polybot backtest` |
+| Qui | 20:00 | `polybot resolve && polybot recommend` |
+| Qui | 21:00 | `POLYBOT_MAX_HOURS_TO_RESOLUTION=96 polybot backtest` |
+| Sex | 20:00 | `polybot resolve && polybot recommend` |
+| Sex | 21:00 | `polybot calibrate && polybot backtest` |
+| Sáb | 20:00 | `polybot resolve && polybot calibrate && polybot backtest` |
+| Dom | 20:00 | `polybot dash` |
+
+Fixe os thresholds vencedores no `.env` ao final do domingo.
+
+### Semana 4 — Validação out-of-sample
+
+Thresholds congelados da semana 3. O backtest de qua/sex deve usar **apenas dias da semana 4** para validar que os ganhos não foram overfitting.
+
+| Dia | Horário | Ação |
+|---|---|---|
+| Seg | 20:00 | `polybot resolve && polybot recommend` |
+| Ter | 20:00 | `polybot resolve && polybot recommend` |
+| Qua | 20:00 | `polybot resolve && polybot recommend` |
+| Qua | 21:00 | `polybot backtest --from 2026-05-11` |
+| Qui | 20:00 | `polybot resolve && polybot recommend` |
+| Sex | 20:00 | `polybot resolve && polybot recommend` |
+| Sex | 21:00 | `polybot calibrate && polybot backtest` |
+| Sáb | 20:00 | `polybot resolve && polybot calibrate && polybot backtest` |
+| Dom | 20:00 | `polybot dash` |
+
+Só considere ligar `POLYBOT_EXECUTION_ENABLED=true` se: (a) ≥30 outcomes acumulados, (b) calibração nos decis bate a diagonal, (c) ROI simulado positivo out-of-sample.
+
+### Rotina diária fixa (após semana 4)
+
+| Dia | Horário | Ação |
+|---|---|---|
+| Seg–Sáb | 20:00 | `polybot resolve && polybot recommend` |
+| Dom | 20:00 | `polybot calibrate && polybot backtest --from $(date -d '30 days ago' +%Y-%m-%d)` |
+
+### Notas operacionais
+
+- **Ajuste as datas** em `--from` para o primeiro dia real do seu loop (as datas acima pressupõem início em 2026-04-20).
+- **Priorize mercados com 24–72h até resolução** — com apenas 1 scan/dia você perde o "segundo olhar" pouco antes do close.
+- **Registre Brier/ROI semana-a-semana** num CSV externo.
+- **Priorize estações com volume** (KLGA, KJFK, EGLL, RKSI) para atingir n≥5 por bucket mais rápido.
+- **Backup antes de experimentos**: `cp polybot.db polybot.db.bak-$(date +%Y%m%d-%H%M)`.
+
+---
+
 ## Licença
 
 MIT.
